@@ -12,16 +12,18 @@ from typing import Any, Optional, Tuple
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+os.environ.setdefault("KERAS_BACKEND", "tensorflow")
 warnings.filterwarnings("ignore", message="Could not find the number of physical cores.*")
 warnings.filterwarnings("ignore", message="The structure of `inputs` doesn't match the expected structure.*")
 
+import keras
 import numpy as np
 import tensorflow as tf
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import normalize
 
-tf.keras.mixed_precision.set_global_policy("float32")
+keras.config.set_dtype_policy("float32")
 
 IMG_SIZE = (224, 224)
 DEFAULT_THRESHOLD = 0.5
@@ -29,8 +31,8 @@ DEFAULT_KNN_NEIGHBORS = 10
 GRAPH_THRESHOLD = 0.3
 
 
-@tf.keras.utils.register_keras_serializable(package="FedDGPneuNet")
-class EdgeAwareGATv2(tf.keras.layers.Layer):
+@keras.saving.register_keras_serializable(package="FedDGPneuNet")
+class EdgeAwareGATv2(keras.layers.Layer):
     def __init__(self, units: int, num_heads: int = 4, dropout_rate: float = 0.2, **kwargs: Any):
         super().__init__(**kwargs)
         self.units = int(units)
@@ -113,10 +115,14 @@ class EdgeAwareGATv2(tf.keras.layers.Layer):
         return config
 
 
+def keras_load_objects() -> dict[str, Any]:
+    return {"EdgeAwareGATv2": EdgeAwareGATv2}
+
+
 @dataclass
 class ModelArtifacts:
-    feature_extractor: tf.keras.Model
-    gat_model: tf.keras.Model
+    feature_extractor: keras.Model
+    gat_model: keras.Model
     reference_features: np.ndarray
     reference_labels: np.ndarray
     threshold: float
@@ -135,21 +141,36 @@ def load_threshold(model_dir: Path) -> float:
         return DEFAULT_THRESHOLD
 
 
-def model_graph_shape(model: tf.keras.Model) -> tuple[int, int]:
-    x_shape = model.input_shape[0] if isinstance(model.input_shape, list) else model.input_shape
-    nodes = int(x_shape[1]) if x_shape[1] is not None else 65
-    feature_dim = int(x_shape[2]) if x_shape[2] is not None else 512
+def model_graph_shape(model: keras.Model) -> tuple[int, int]:
+    inputs = model.inputs if hasattr(model, "inputs") else [model.input]
+    first_input = inputs[0] if isinstance(inputs, list) else inputs
+    shape = getattr(first_input, "shape", None) or getattr(model, "input_shape", None)
+    if shape is None:
+        return 65, 512
+    if isinstance(shape, (list, tuple)) and shape and isinstance(shape[0], (list, tuple)):
+        shape = shape[0]
+    shape_list = list(shape)
+    nodes = int(shape_list[1]) if len(shape_list) > 1 and shape_list[1] is not None else 65
+    feature_dim = int(shape_list[2]) if len(shape_list) > 2 and shape_list[2] is not None else 512
     return nodes, feature_dim
+
+
+def _load_keras_model(path: Path) -> keras.Model:
+    """Load .h5 files saved with Keras 3 (avoids Keras-2 as_list graph errors)."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Model file not found: {path}")
+    return keras.saving.load_model(
+        path,
+        custom_objects=keras_load_objects(),
+        compile=False,
+        safe_mode=False,
+    )
 
 
 def load_artifacts(model_dir: str | Path = "model") -> ModelArtifacts:
     model_dir = Path(model_dir)
-    feature_extractor = tf.keras.models.load_model(model_dir / "feature_extractor.h5", compile=False)
-    gat_model = tf.keras.models.load_model(
-        model_dir / "feddg_gatnet_model.h5",
-        custom_objects={"EdgeAwareGATv2": EdgeAwareGATv2},
-        compile=False,
-    )
+    feature_extractor = _load_keras_model(model_dir / "feature_extractor.h5")
+    gat_model = _load_keras_model(model_dir / "feddg_gatnet_model.h5")
     reference_features = np.load(model_dir / "reference_features.npy").astype(np.float32)
     reference_labels = np.load(model_dir / "reference_labels.npy").astype(np.float32)
     nodes, feature_dim = model_graph_shape(gat_model)
@@ -164,11 +185,11 @@ def load_artifacts(model_dir: str | Path = "model") -> ModelArtifacts:
     )
 
 
-def extractor_has_internal_rescaling(model: tf.keras.Model) -> bool:
+def extractor_has_internal_rescaling(model: keras.Model) -> bool:
     return any(layer.__class__.__name__.lower() == "rescaling" for layer in model.layers[:8])
 
 
-def preprocess_image(image: Image.Image, feature_extractor: tf.keras.Model) -> tuple[np.ndarray, Image.Image, str]:
+def preprocess_image(image: Image.Image, feature_extractor: keras.Model) -> tuple[np.ndarray, Image.Image, str]:
     original = ImageOps.exif_transpose(image).convert("RGB")
     resized = original.resize(IMG_SIZE, Image.Resampling.BILINEAR)
     array = np.asarray(resized).astype(np.float32)
@@ -246,7 +267,7 @@ def query_probability_tensor(output: tf.Tensor) -> tf.Tensor:
     return tf.reshape(output, [-1])
 
 
-def find_last_spatial_layer(model: tf.keras.Model) -> Optional[str]:
+def find_last_spatial_layer(model: keras.Model) -> Optional[str]:
     for layer in reversed(model.layers):
         try:
             output = layer.output

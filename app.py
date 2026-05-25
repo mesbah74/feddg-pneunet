@@ -5,19 +5,42 @@ from pathlib import Path
 from typing import Iterable
 from html import escape
 
-import cv2
 import numpy as np
 import streamlit as st
 from PIL import Image
 
-try:
-    from model.inference import load_artifacts, run_prediction
-except Exception as _inference_import_error:  # pragma: no cover - surfaces in UI
-    load_artifacts = None  # type: ignore[assignment]
-    run_prediction = None  # type: ignore[assignment]
-    INFERENCE_IMPORT_ERROR = str(_inference_import_error)
-else:
-    INFERENCE_IMPORT_ERROR = ""
+# Lazy imports keep the UI alive when TensorFlow/NumPy versions mismatch.
+load_artifacts = None
+run_prediction = None
+INFERENCE_IMPORT_ERROR = ""
+_cv2_module = None
+
+
+def _get_cv2():
+    global _cv2_module
+    if _cv2_module is None:
+        import cv2 as cv2_module
+
+        _cv2_module = cv2_module
+    return _cv2_module
+
+
+def _ensure_inference_imported() -> None:
+    global load_artifacts, run_prediction, INFERENCE_IMPORT_ERROR
+    if load_artifacts is not None and run_prediction is not None:
+        return
+    if INFERENCE_IMPORT_ERROR:
+        return
+    try:
+        from model.inference import load_artifacts as _load_artifacts
+        from model.inference import run_prediction as _run_prediction
+
+        load_artifacts = _load_artifacts
+        run_prediction = _run_prediction
+    except Exception as exc:
+        load_artifacts = None
+        run_prediction = None
+        INFERENCE_IMPORT_ERROR = str(exc)
 
 APP_NAME = "FedDG-PneuNet"
 APP_ROOT = Path(__file__).resolve().parent
@@ -414,8 +437,14 @@ def css() -> None:
 
 def check_model_files() -> tuple[bool, str]:
     """Verify required artifacts exist before TensorFlow load."""
+    _ensure_inference_imported()
     if load_artifacts is None:
-        return False, f"Inference module unavailable: {INFERENCE_IMPORT_ERROR}"
+        message = INFERENCE_IMPORT_ERROR or "Inference module could not be loaded."
+        if "numpy" in message.lower() or "_ARRAY_API" in message:
+            message += " Fix: pip install \"numpy>=1.26,<2.0\" then restart Streamlit."
+        if "as_list" in message.lower() or "dtypepolicy" in message.lower() or "batch_shape" in message.lower():
+            message += " Fix: pip install \"keras>=3.5\" then restart Streamlit."
+        return False, f"Inference module unavailable: {message}"
     missing = [name for name in REQUIRED_MODEL_FILES if not (MODEL_DIR / name).is_file()]
     if missing:
         return (
@@ -431,13 +460,6 @@ def get_artifacts():
     if not ready:
         raise RuntimeError(message)
     return load_artifacts(MODEL_DIR)
-
-
-def safe_page_index(pages: list[str], current: str) -> int:
-    try:
-        return pages.index(current)
-    except ValueError:
-        return 0
 
 
 def uploaded_file_size(uploaded_file) -> int:
@@ -573,6 +595,7 @@ def _resize_for_validation(image: np.ndarray) -> np.ndarray:
         return image
     scale = XRAY_VALIDATION_MAX_DIM / longest
     new_size = (int(width * scale), int(height * scale))
+    cv2 = _get_cv2()
     return cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
 
 
@@ -600,6 +623,7 @@ def validate_chest_xray(uploaded_file) -> tuple[bool, str]:
     if channel_mean_diff > 12.0:
         return False, INVALID_XRAY_MESSAGE
 
+    cv2 = _get_cv2()
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     gray_from_mean = (red + green + blue) / 3.0
     grayscale_similarity = float(np.mean(np.abs(gray.astype(np.float32) - gray_from_mean)))
@@ -607,7 +631,7 @@ def validate_chest_xray(uploaded_file) -> tuple[bool, str]:
         return False, INVALID_XRAY_MESSAGE
 
     # Color rejection: selfies, landscapes, and cartoons carry higher saturation/colorfulness.
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)  # cv2 set above
     saturation = hsv[:, :, 1]
     sat_mean = float(np.mean(saturation))
     sat_std = float(np.std(saturation))
@@ -770,7 +794,7 @@ def page_home() -> None:
                     reports_dir=APP_ROOT / "reports",
                 )
                 st.session_state.patient_name = patient_name_value
-                st.session_state.page = "Result"
+                st.session_state["page"] = "Result"
         except Exception as exc:
             st.error(f"Prediction failed: {exc}")
             return
@@ -795,7 +819,7 @@ def page_result() -> None:
     if not result:
         st.info("No result yet. Upload a chest X-ray from Home to run a FedDG-PneuNet prediction.")
         if st.button("Start analysis", type="primary"):
-            st.session_state.page = "Home"
+            st.session_state["page"] = "Home"
             st.rerun()
         return
 
@@ -1005,7 +1029,7 @@ def render_model_status() -> None:
     )
 
 
-def main() -> None:
+def _run_app() -> None:
     css()
     render_model_status()
     brand_col, nav_col = st.columns([1.35, 1], gap="large")
@@ -1014,17 +1038,16 @@ def main() -> None:
     with nav_col:
         st.markdown('<div class="nav-shell">', unsafe_allow_html=True)
         pages = ["Home", "Result", "Research", "Awareness"]
-        current = str(st.session_state.get("page", "Home"))
+        if "page" not in st.session_state or st.session_state.page not in pages:
+            st.session_state.page = "Home"
         page = st.radio(
             "Navigation",
             pages,
-            index=safe_page_index(pages, current),
             horizontal=True,
             label_visibility="collapsed",
-            key="main_navigation",
+            key="page",
         )
         st.markdown("</div>", unsafe_allow_html=True)
-    st.session_state.page = page
 
     if page == "Home":
         page_home()
@@ -1035,6 +1058,14 @@ def main() -> None:
     else:
         page_awareness()
     footer()
+
+
+def main() -> None:
+    try:
+        _run_app()
+    except Exception as exc:
+        st.error("The application hit an unexpected error.")
+        st.exception(exc)
 
 
 if __name__ == "__main__":
