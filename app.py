@@ -52,41 +52,61 @@ def css() -> None:
         <style>
         :root {
             --bg: #f2f7fb;
-            --surface: rgba(255,255,255,.92);
+            --surface: rgba(255,255,255,.96);
             --surface-strong: #ecf6ff;
             --text: #111c2f;
-            --muted: #63748d;
+            --muted: #5a6d85;
             --line: #d7e4f1;
             --blue: #1467e8;
             --blue-dark: #0b3f93;
             --cyan: #16a7c7;
             --mint: #12a37c;
-            --danger: #d64550;
-            --amber: #c98d1d;
+            --danger: #c5303c;
+            --amber: #9a6b12;
             --shadow: 0 22px 60px rgba(17,28,47,.13);
             --shadow-soft: 0 12px 34px rgba(20,103,232,.12);
-            --radius: 8px;
+            --radius: 10px;
+            --space-xs: 8px;
+            --space-sm: 12px;
+            --space-md: 18px;
+            --space-lg: 28px;
+            --space-xl: 40px;
         }
         .stApp {
             background:
-                linear-gradient(120deg, rgba(255,255,255,.94), rgba(232,244,255,.88) 42%, rgba(244,249,252,.98)),
-                repeating-linear-gradient(90deg, rgba(20,103,232,.045) 0, rgba(20,103,232,.045) 1px, transparent 1px, transparent 78px),
-                repeating-linear-gradient(0deg, rgba(22,167,199,.04) 0, rgba(22,167,199,.04) 1px, transparent 1px, transparent 78px),
+                linear-gradient(120deg, rgba(255,255,255,.96), rgba(232,244,255,.9) 42%, rgba(244,249,252,.98)),
+                repeating-linear-gradient(90deg, rgba(20,103,232,.04) 0, rgba(20,103,232,.04) 1px, transparent 1px, transparent 78px),
+                repeating-linear-gradient(0deg, rgba(22,167,199,.035) 0, rgba(22,167,199,.035) 1px, transparent 1px, transparent 78px),
                 var(--bg);
             color: var(--text);
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
         header[data-testid="stHeader"] { background: transparent; }
-        #MainMenu, footer[data-testid="stFooter"] { visibility: hidden; }
+        [data-testid="stToolbar"], #MainMenu, footer[data-testid="stFooter"] { visibility: hidden; }
         .block-container {
             width: min(1180px, calc(100% - 32px));
             max-width: 1180px;
-            padding: 24px 0 40px;
+            padding: var(--space-md) 0 var(--space-xl);
         }
-        h1, h2, h3, p { overflow-wrap: anywhere; letter-spacing: 0; }
-        .topbar {
-            display: flex; align-items: center; justify-content: space-between; gap: 16px;
-            min-height: 72px; margin-bottom: 28px; animation: fadeUp .52s ease both;
+        .block-container p, .block-container li, .block-container label,
+        .block-container span, .block-container h1, .block-container h2, .block-container h3 {
+            color: var(--text);
+            overflow-wrap: anywhere;
+            letter-spacing: 0;
+        }
+        [data-testid="stAppViewContainer"] { background: transparent; }
+        [data-testid="stVerticalBlock"] { gap: 0.65rem; }
+        [data-testid="stColumn"] { min-width: 0; }
+        [data-testid="stHorizontalBlock"]:has(.nav-shell) {
+            margin-bottom: var(--space-lg);
+            align-items: center !important;
+            gap: 1rem;
+        }
+        [data-testid="stHorizontalBlock"]:has(.nav-shell) [data-testid="stColumn"] {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
         }
         .brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
         .brand-mark {
@@ -94,22 +114,27 @@ def css() -> None:
             color: white; background: linear-gradient(135deg, var(--blue), var(--cyan) 58%, var(--mint));
             box-shadow: 0 12px 28px rgba(20,103,232,.24); font-weight: 850; animation: softPulse 3.8s ease-in-out infinite;
         }
-        .brand strong, .brand small { display:block; line-height:1.15; }
+        .brand strong, .brand small { display:block; line-height:1.15; color: var(--text); }
         .brand small { margin-top: 2px; color: var(--muted); font-size: .8rem; }
-        div[data-testid="stRadio"] > label { display: none; }
-        div[role="radiogroup"] {
-            display: flex !important; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px;
-            background: rgba(255,255,255,.82); box-shadow: 0 10px 30px rgba(17,28,47,.07); backdrop-filter: blur(14px);
-            width: fit-content; margin-left: auto; margin-top: -86px; margin-bottom: 38px;
+        .nav-shell [data-testid="stRadio"] { width: 100%; }
+        .nav-shell [data-testid="stRadio"] > label { display: none; }
+        .nav-shell div[role="radiogroup"] {
+            display: flex !important; flex-wrap: wrap; justify-content: flex-end; gap: 6px;
+            width: 100%; margin: 0; padding: 6px;
+            border: 1px solid var(--line); border-radius: var(--radius);
+            background: rgba(255,255,255,.92); box-shadow: var(--shadow-soft);
         }
-        div[role="radiogroup"] label {
-            min-width: 92px; min-height: 42px; justify-content: center; border-radius: 6px;
-            color: var(--muted); font-weight: 800; transition: background .18s ease, color .18s ease;
+        .nav-shell div[role="radiogroup"] label {
+            flex: 1 1 auto; min-width: 88px; min-height: 42px; justify-content: center;
+            border-radius: 6px; color: var(--muted) !important; font-weight: 800;
+            transition: background .18s ease, color .18s ease;
         }
-        div[role="radiogroup"] label:has(input:checked) { color: var(--blue-dark); background: var(--surface-strong); }
+        .nav-shell div[role="radiogroup"] label:has(input:checked) {
+            color: var(--blue-dark) !important; background: var(--surface-strong);
+        }
         .hero-grid {
-            display: grid; grid-template-columns: minmax(0,1fr) minmax(360px,470px); align-items: center;
-            gap: 36px; min-height: 610px;
+            display: grid; grid-template-columns: minmax(0,1fr) minmax(320px,470px); align-items: start;
+            gap: var(--space-lg); min-height: auto;
         }
         .hero-copy { animation: fadeUp .68s .08s ease both; }
         .eyebrow { margin: 0 0 10px; color: var(--cyan); font-size: .78rem; font-weight: 900; text-transform: uppercase; }
@@ -146,40 +171,74 @@ def css() -> None:
         .node-a { left:18%; } .node-b { left:48%; background:var(--cyan); animation-delay:.42s; } .node-c { right:18%; background:var(--mint); animation-delay:.84s; }
         .signal-bar { position:absolute; bottom:20px; width:9px; border-radius:999px; background:linear-gradient(180deg,var(--cyan),var(--blue)); opacity:.72; animation:barRise 1.8s ease-in-out infinite; }
         .bar-a { left:31%; height:30px; } .bar-b { left:35%; height:46px; animation-delay:.26s; } .bar-c { left:39%; height:24px; animation-delay:.52s; }
-        .upload-panel, .glass-card, .result-summary, .image-panel, .health-card, .research-card {
-            border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(16px);
+        .glass-card, .result-summary, .image-panel, .health-card, .research-card {
+            border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+            box-shadow: var(--shadow); backdrop-filter: blur(16px);
         }
-        .upload-panel { position:relative; overflow:hidden; padding:22px; animation:cardFloatIn .72s .16s ease both; }
-        .upload-panel:before { position:absolute; inset:0 0 auto; height:4px; content:""; background:linear-gradient(90deg,var(--blue),var(--cyan),var(--mint)); }
-        .panel-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }
-        .panel-heading h2 { margin:0; font-size:1.45rem; line-height:1.15; }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) > [data-testid="stVerticalBlock"] {
+            position: relative; overflow: hidden;
+            padding: var(--space-md); border: 1px solid var(--line); border-radius: var(--radius);
+            background: var(--surface); box-shadow: var(--shadow);
+            animation: cardFloatIn .72s .16s ease both;
+        }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) > [data-testid="stVerticalBlock"]::before {
+            position: absolute; inset: 0 0 auto; height: 4px; content: "";
+            background: linear-gradient(90deg, var(--blue), var(--cyan), var(--mint));
+            border-radius: var(--radius) var(--radius) 0 0;
+            pointer-events: none;
+        }
+        .upload-panel-anchor { display: none !important; height: 0; margin: 0; padding: 0; }
+        .panel-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:var(--space-sm); }
+        .panel-heading h2 { margin:0; font-size:1.45rem; line-height:1.15; color:var(--text); }
         .secure-badge { min-height:36px; padding:8px 12px; border:1px solid rgba(18,166,122,.22); border-radius:6px; color:#0c7556; background:rgba(18,166,122,.08); font-weight:800; }
-        .dropzone-note { color: var(--muted); font-size: .94rem; margin-top: -8px; margin-bottom: 12px; }
-        .dropzone-copy {
-            display:grid; place-items:center; min-height:150px; padding:22px 18px; margin-bottom:12px;
-            border:2px dashed #a9c7e9; border-radius:8px; background:linear-gradient(180deg,rgba(239,248,255,.82),rgba(255,255,255,.95));
-            text-align:center; transition:border-color .18s ease, background .18s ease, transform .18s ease, box-shadow .18s ease;
-        }
-        .dropzone-copy:hover { border-color:var(--blue); background:#eef6ff; transform:translateY(-2px); box-shadow:inset 0 0 0 1px rgba(20,103,232,.08), 0 18px 34px rgba(20,103,232,.12); }
-        .drop-icon {
-            display:grid; place-items:center; width:76px; height:76px; margin-bottom:14px; border-radius:8px; color:var(--blue);
-            background:white; box-shadow:0 12px 28px rgba(23,105,224,.16); animation:iconFloat 3.4s ease-in-out infinite;
-        }
-        .drop-icon svg, .health-icon svg, .warning-icon svg, .footer-email svg { width:26px; height:26px; fill:currentColor; }
-        .drop-title { display:block; width:100%; color:var(--text); font-size:1.14rem; font-weight:850; }
-        .drop-note { display:block; margin-top:8px; color:var(--muted); font-size:.94rem; }
+        .upload-hint { margin: 0 0 var(--space-xs); color: var(--muted); font-size: .9rem; line-height: 1.5; }
+        .health-icon svg, .warning-icon svg, .footer-email svg { width:26px; height:26px; fill:currentColor; }
+        div[data-testid="stTextInput"] label p { color: var(--text) !important; font-weight: 700; }
         div[data-testid="stTextInput"] input {
             min-height: 46px; border-radius: 6px; border-color: var(--line);
-            background: #fafcff; font-weight: 600;
+            background: #fafcff; color: var(--text); font-weight: 600;
         }
         div[data-testid="stTextInput"] input:focus {
             border-color: var(--blue); box-shadow: 0 0 0 2px rgba(20,103,232,.12);
         }
-        div[data-testid="stFileUploader"] {
-            padding: 12px; border: 1px solid var(--line); border-radius: 8px;
-            background: #fafcff;
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] {
+            padding: 0; margin: var(--space-xs) 0;
+            background: transparent !important;
         }
-        div[data-testid="stFileUploader"] section { border: 0; background: transparent; }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] section[data-testid="stFileUploadDropzone"] {
+            min-height: 148px; padding: var(--space-md);
+            border: 2px dashed #a9c7e9 !important; border-radius: var(--radius) !important;
+            background: linear-gradient(180deg, rgba(239,248,255,.9), rgba(255,255,255,.98)) !important;
+        }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] section[data-testid="stFileUploadDropzone"]:hover {
+            border-color: var(--blue) !important;
+            background: #eef6ff !important;
+        }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] section[data-testid="stFileUploadDropzone"] > div,
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"],
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] small {
+            background: transparent !important;
+            color: var(--muted) !important;
+        }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] div,
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] span {
+            color: var(--text) !important;
+        }
+        [data-testid="stColumn"]:has(.upload-panel-anchor) [data-testid="stFileUploader"] button {
+            color: var(--blue-dark) !important; background: #fff !important;
+            border: 1px solid var(--line) !important; border-radius: 6px !important; font-weight: 700;
+        }
+        [data-testid="stFileUploader"] [data-testid="stFileUploaderBackdrop"] { display: none !important; }
+        [data-testid="stFileUploader"] [data-testid="stFileUploadDropzone"] [style*="background-color: rgb(0"] {
+            background: linear-gradient(180deg, rgba(239,248,255,.9), rgba(255,255,255,.98)) !important;
+        }
+        [data-testid="stAlert"] {
+            border-radius: var(--radius); color: var(--text) !important;
+        }
+        [data-testid="stAlert"] p, [data-testid="stAlert"] div { color: inherit !important; }
+        div[data-testid="stNotification"] { color: var(--text); }
+        [data-testid="stCaptionContainer"] { color: var(--muted) !important; }
+        [data-testid="stImage"] figcaption { color: var(--muted) !important; }
         .workflow-band { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:14px; margin-top:32px; }
         .workflow-step, .health-card, .research-card {
             min-height:160px; padding:18px; box-shadow:0 10px 28px rgba(17,28,47,.06);
@@ -234,6 +293,8 @@ def css() -> None:
         .section-heading { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:18px; }
         .health-card-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:14px; }
         .health-card { min-height:214px; }
+        .health-card h3, .research-card h3, .workflow-step strong { color: var(--text); }
+        .workflow-band { margin-top: var(--space-lg); }
         .health-icon, .warning-icon { display:inline-grid; place-items:center; width:44px; height:44px; margin-bottom:14px; border-radius:8px; color:var(--blue); background:linear-gradient(135deg,#eef6ff,white); box-shadow:0 10px 24px rgba(20,103,232,.12); font-weight:900; }
         .infographic-card { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
         .infographic-card span { padding:8px 11px; border:1px solid rgba(20,103,232,.12); border-radius:6px; background:#f7fbff; color:var(--blue-dark); font-weight:850; }
@@ -264,9 +325,16 @@ def css() -> None:
         .social-row span:hover { transform:translateY(-2px); background:linear-gradient(135deg,var(--blue),var(--cyan)); }
         .footer-bottom { position:relative; display:flex; justify-content:space-between; gap:16px; padding:16px 28px 20px; border-top:1px solid rgba(255,255,255,.10); color:#9fb5ca; font-size:.9rem; }
         .stButton button, .stDownloadButton button {
-            min-height:46px; border-radius:6px; font-weight:850; transition:transform .18s ease, box-shadow .18s ease;
+            min-height:46px; border-radius:6px; font-weight:850;
+            color: #fff !important; transition:transform .18s ease, box-shadow .18s ease;
         }
-        .stButton button:hover, .stDownloadButton button:hover { transform:translateY(-1px); box-shadow:0 14px 30px rgba(23,105,224,.18); }
+        .stButton button:hover, .stDownloadButton button:hover {
+            transform:translateY(-1px); box-shadow:0 14px 30px rgba(23,105,224,.18);
+        }
+        [data-testid="stSpinner"] { color: var(--blue-dark) !important; }
+        [data-testid="stTable"] { color: var(--text); }
+        [data-testid="stTable"] th { color: var(--blue-dark); background: var(--surface-strong); }
+        [data-testid="stTable"] td { color: var(--text); }
         @keyframes fadeUp { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
         @keyframes cardFloatIn { from { opacity:0; transform:translateY(20px) scale(.985); } to { opacity:1; transform:translateY(0) scale(1); } }
         @keyframes scanMove { 0%,42% { transform:translateX(-110%); } 72%,100% { transform:translateX(110%); } }
@@ -277,32 +345,50 @@ def css() -> None:
         @keyframes barRise { 0%,100% { transform:scaleY(.72); opacity:.56; } 50% { transform:scaleY(1.08); opacity:.95; } }
         @keyframes meterFill { from { transform:scaleX(.82); transform-origin:left; opacity:.76; } to { transform:scaleX(1); opacity:1; } }
         @media (max-width: 980px) {
-            .hero-grid, .image-grid, .result-grid, .awareness-hero, .emergency-section { grid-template-columns:1fr; min-height:auto; }
+            [data-testid="stHorizontalBlock"]:has(.nav-shell) {
+                flex-wrap: wrap;
+            }
+            [data-testid="stHorizontalBlock"]:has(.nav-shell) [data-testid="stColumn"] {
+                width: 100% !important;
+                flex: 1 1 100%;
+            }
+            .nav-shell div[role="radiogroup"] { justify-content: stretch; }
+            .hero-grid, .image-grid, .result-grid, .awareness-hero, .emergency-section {
+                grid-template-columns:1fr; min-height:auto;
+            }
             .workflow-band, .health-card-grid, .footer-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
             .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
             .medical-illustration { min-height:220px; }
+            .result-title { font-size: clamp(1.8rem, 6vw, 3rem); }
         }
         @media (max-width: 720px) {
-            .block-container { width:min(100% - 22px,1180px); padding-top:14px; }
-            .topbar { align-items:stretch; flex-direction:column; margin-bottom:14px; }
-            div[role="radiogroup"] { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); width:100%; margin:0 0 24px; }
-            div[role="radiogroup"] label { min-width:0; }
-            .hero-grid { gap:24px; }
-            .hero-title .main { font-size:2.4rem; margin-bottom:8px; }
-            .hero-title .sub { font-size:1.78rem; }
+            .block-container { width:min(100% - 20px,1180px); padding: var(--space-sm) 0 var(--space-lg); }
+            [data-testid="stHorizontalBlock"]:has(.nav-shell) { margin-bottom: var(--space-md); }
+            .nav-shell div[role="radiogroup"] {
+                display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); width:100%;
+            }
+            .nav-shell div[role="radiogroup"] label { min-width:0; }
+            .hero-grid { gap:var(--space-md); }
+            .hero-title .main { font-size:2.2rem; margin-bottom:8px; }
+            .hero-title .sub { font-size:1.55rem; }
             .signal-board { display:none; }
             .status-row span { width:100%; }
-            .workflow-band, .health-card-grid, .warning-grid, .footer-grid, .metric-grid, .report-tools { grid-template-columns:1fr; }
-            .awareness-hero, .emergency-section, .medical-disclaimer-card { padding:16px; }
+            .workflow-band, .health-card-grid, .warning-grid, .footer-grid, .metric-grid, .report-tools {
+                grid-template-columns:1fr;
+            }
+            .awareness-hero, .emergency-section, .medical-disclaimer-card { padding:var(--space-md); }
             .section-heading { align-items:stretch; flex-direction:column; }
             .infographic-card { justify-content:flex-start; }
             .medical-disclaimer-card { grid-template-columns:1fr; }
             .footer-brand { padding:22px 18px; }
             .footer-grid { padding:18px; }
-            .footer-bottom { flex-direction:column; }
+            .footer-bottom { flex-direction:column; align-items:flex-start; }
+            [data-testid="stColumn"]:has(.upload-panel-anchor) > [data-testid="stVerticalBlock"] {
+                padding: var(--space-sm);
+            }
         }
         @media print {
-            div[role="radiogroup"], .topbar, .footer, .stButton, .stDownloadButton { display:none !important; }
+            [data-testid="stHorizontalBlock"]:has(.nav-shell), .footer, .stButton, .stDownloadButton { display:none !important; }
             .block-container { width:100%; max-width:none; padding:0; }
         }
         </style>
@@ -316,14 +402,12 @@ def get_artifacts():
     return load_artifacts(MODEL_DIR)
 
 
-def html_topbar() -> None:
+def html_brand() -> None:
     st.markdown(
         """
-        <div class="topbar">
-            <div class="brand">
-                <span class="brand-mark">FP</span>
-                <span><strong>FedDG-PneuNet</strong><small>Medical Graph AI</small></span>
-            </div>
+        <div class="brand">
+            <span class="brand-mark">FP</span>
+            <span><strong>FedDG-PneuNet</strong><small>Medical Graph AI</small></span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -539,19 +623,12 @@ def page_home() -> None:
             unsafe_allow_html=True,
         )
     with right:
-        st.markdown('<div class="upload-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="upload-panel-anchor" aria-hidden="true"></div>', unsafe_allow_html=True)
         st.markdown(
             """
             <div class="panel-heading">
                 <div><p class="eyebrow">New analysis</p><h2>Upload X-ray</h2></div>
-                <span class="secure-badge">Python</span>
-            </div>
-            <div class="dropzone-copy">
-                <span class="drop-icon">
-                    <svg viewBox="0 0 24 24" role="img"><path d="M12 3a5 5 0 0 0-5 5v1H6a4 4 0 0 0 0 8h4v-2H6a2 2 0 1 1 0-4h3V8a3 3 0 1 1 6 0v3h3a2 2 0 1 1 0 4h-4v2h4a4 4 0 0 0 0-8h-1V8a5 5 0 0 0-5-5Zm1 9h3l-4-4-4 4h3v7h2v-7Z"/></svg>
-                </span>
-                <span class="drop-title">Drop chest X-ray image</span>
-                <span class="drop-note">JPG, JPEG, or PNG up to 8 MB</span>
+                <span class="secure-badge">Secure</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -562,7 +639,13 @@ def page_home() -> None:
             help="Required before running pneumonia prediction.",
             key="patient_name_input",
         )
-        uploaded = st.file_uploader("Drop chest X-ray image", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
+        st.markdown('<p class="upload-hint">Chest X-ray file (JPG, JPEG, or PNG, max 8 MB)</p>', unsafe_allow_html=True)
+        uploaded = st.file_uploader(
+            "Chest X-ray image",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="collapsed",
+            key="chest_xray_uploader",
+        )
         if uploaded is not None:
             ok, message = validate_upload(uploaded)
             if ok:
@@ -574,7 +657,6 @@ def page_home() -> None:
             else:
                 st.error(message)
         run = st.button("Run prediction", type="primary", use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
     if run:
         patient_name_value = (patient_name or "").strip()
@@ -793,11 +875,24 @@ def page_research() -> None:
 
 def main() -> None:
     css()
-    html_topbar()
-    pages = ["Home", "Result", "Research", "Awareness"]
-    current = st.session_state.get("page", "Home")
-    page = st.radio("Navigation", pages, index=pages.index(current), horizontal=True, label_visibility="collapsed")
+    brand_col, nav_col = st.columns([1.35, 1], gap="large", vertical_alignment="center")
+    with brand_col:
+        html_brand()
+    with nav_col:
+        st.markdown('<div class="nav-shell">', unsafe_allow_html=True)
+        pages = ["Home", "Result", "Research", "Awareness"]
+        current = st.session_state.get("page", "Home")
+        page = st.radio(
+            "Navigation",
+            pages,
+            index=pages.index(current),
+            horizontal=True,
+            label_visibility="collapsed",
+            key="main_navigation",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
     st.session_state.page = page
+
     if page == "Home":
         page_home()
     elif page == "Result":
