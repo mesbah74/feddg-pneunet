@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.streamlit/
+uploads/*
+reports/*
+!uploads/.gitkeep
+!reports/.gitkeep
