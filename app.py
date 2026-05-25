@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Iterable
 from html import escape
 
+import cv2
+import numpy as np
 import streamlit as st
 from PIL import Image
 
@@ -13,6 +15,10 @@ APP_NAME = "FedDG-PneuNet"
 MODEL_DIR = Path("model")
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+INVALID_XRAY_MESSAGE = "Please upload a valid Chest X-ray image."
+EMPTY_PATIENT_NAME_MESSAGE = "Please enter the patient's name before running prediction."
+# Analysis size keeps validation fast while preserving image structure.
+XRAY_VALIDATION_MAX_DIM = 512
 
 MEDICAL_ICONS = {
     "thermometer": '<path d="M14 14.8V5a4 4 0 0 0-8 0v9.8a6 6 0 1 0 8 0ZM10 20a3 3 0 0 1-2-5.24V5a2 2 0 1 1 4 0v9.76A3 3 0 0 1 10 20Z"/>',
@@ -162,6 +168,13 @@ def css() -> None:
         .drop-icon svg, .health-icon svg, .warning-icon svg, .footer-email svg { width:26px; height:26px; fill:currentColor; }
         .drop-title { display:block; width:100%; color:var(--text); font-size:1.14rem; font-weight:850; }
         .drop-note { display:block; margin-top:8px; color:var(--muted); font-size:.94rem; }
+        div[data-testid="stTextInput"] input {
+            min-height: 46px; border-radius: 6px; border-color: var(--line);
+            background: #fafcff; font-weight: 600;
+        }
+        div[data-testid="stTextInput"] input:focus {
+            border-color: var(--blue); box-shadow: 0 0 0 2px rgba(20,103,232,.12);
+        }
         div[data-testid="stFileUploader"] {
             padding: 12px; border: 1px solid var(--line); border-radius: 8px;
             background: #fafcff;
@@ -386,6 +399,103 @@ def validate_upload(uploaded_file) -> tuple[bool, str]:
     return True, ""
 
 
+def _load_rgb_array(uploaded_file) -> np.ndarray | None:
+    """Decode upload to RGB NumPy array for OpenCV-based checks."""
+    try:
+        uploaded_file.seek(0)
+        image = Image.open(uploaded_file).convert("RGB")
+        uploaded_file.seek(0)
+        return np.asarray(image, dtype=np.uint8)
+    except Exception:
+        return None
+
+
+def _resize_for_validation(image: np.ndarray) -> np.ndarray:
+    """Downscale large images so validation stays fast and stable."""
+    height, width = image.shape[:2]
+    longest = max(height, width)
+    if longest <= XRAY_VALIDATION_MAX_DIM:
+        return image
+    scale = XRAY_VALIDATION_MAX_DIM / longest
+    new_size = (int(width * scale), int(height * scale))
+    return cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+
+
+def validate_chest_xray(uploaded_file) -> tuple[bool, str]:
+    """
+    Heuristic chest X-ray gate using grayscale similarity, color cues, and texture.
+
+    Natural photos, cartoons, and colorful scenes fail before model inference runs.
+    """
+    rgb = _load_rgb_array(uploaded_file)
+    if rgb is None:
+        return False, INVALID_XRAY_MESSAGE
+
+    rgb = _resize_for_validation(rgb)
+    red = rgb[:, :, 0].astype(np.float32)
+    green = rgb[:, :, 1].astype(np.float32)
+    blue = rgb[:, :, 2].astype(np.float32)
+
+    # Grayscale similarity: real X-rays keep R/G/B channels nearly aligned.
+    channel_mean_diff = float(
+        np.mean(np.abs(red - green) + np.abs(red - blue) + np.abs(green - blue)) / 3.0
+    )
+    if channel_mean_diff > 12.0:
+        return False, INVALID_XRAY_MESSAGE
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    gray_from_mean = (red + green + blue) / 3.0
+    grayscale_similarity = float(np.mean(np.abs(gray.astype(np.float32) - gray_from_mean)))
+    if grayscale_similarity > 8.0:
+        return False, INVALID_XRAY_MESSAGE
+
+    # Color rejection: selfies, landscapes, and cartoons carry higher saturation/colorfulness.
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    saturation = hsv[:, :, 1]
+    sat_mean = float(np.mean(saturation))
+    sat_std = float(np.std(saturation))
+    if sat_mean > 45.0 or (sat_std > 35.0 and sat_mean > 25.0):
+        return False, INVALID_XRAY_MESSAGE
+
+    rg = red - green
+    yb = 0.5 * (red + green) - blue
+    colorfulness = float(
+        np.sqrt(np.std(rg) ** 2 + np.std(yb) ** 2)
+        + 0.3 * np.sqrt(np.mean(rg) ** 2 + np.mean(yb) ** 2)
+    )
+    if colorfulness > 25.0:
+        return False, INVALID_XRAY_MESSAGE
+
+    # Edge/texture analysis: radiographs have moderate detail, not flat cartoons or noisy photos.
+    laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    if laplacian_var < 20.0 or laplacian_var > 8000.0:
+        return False, INVALID_XRAY_MESSAGE
+
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = float(np.count_nonzero(edges) / edges.size)
+    if edge_density < 0.008 or edge_density > 0.35:
+        return False, INVALID_XRAY_MESSAGE
+
+    sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    texture_energy = float(np.mean(np.hypot(sobel_x, sobel_y)))
+    if texture_energy < 6.0 or texture_energy > 95.0:
+        return False, INVALID_XRAY_MESSAGE
+
+    # Intensity distribution: chest X-rays use a usable grayscale range with structured contrast.
+    intensity_range = int(gray.max()) - int(gray.min())
+    if intensity_range < 40:
+        return False, INVALID_XRAY_MESSAGE
+
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).flatten()
+    hist_norm = hist / (hist.sum() + 1e-8)
+    entropy = float(-np.sum(hist_norm * np.log2(hist_norm + 1e-10)))
+    if entropy < 3.5 or entropy > 7.8:
+        return False, INVALID_XRAY_MESSAGE
+
+    return True, ""
+
+
 def read_bytes(path: str | Path) -> bytes:
     return Path(path).read_bytes()
 
@@ -446,24 +556,43 @@ def page_home() -> None:
             """,
             unsafe_allow_html=True,
         )
+        patient_name = st.text_input(
+            "Patient name",
+            placeholder="Enter patient name",
+            help="Required before running pneumonia prediction.",
+            key="patient_name_input",
+        )
         uploaded = st.file_uploader("Drop chest X-ray image", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
         if uploaded is not None:
             ok, message = validate_upload(uploaded)
             if ok:
-                st.image(uploaded, caption="Selected chest X-ray preview", use_container_width=True)
+                xray_ok, xray_message = validate_chest_xray(uploaded)
+                if xray_ok:
+                    st.image(uploaded, caption="Selected chest X-ray preview", use_container_width=True)
+                else:
+                    st.error(xray_message)
             else:
                 st.error(message)
         run = st.button("Run prediction", type="primary", use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     if run:
+        patient_name_value = (patient_name or "").strip()
+        if not patient_name_value:
+            st.error(EMPTY_PATIENT_NAME_MESSAGE)
+            return
         ok, message = validate_upload(uploaded)
         if not ok:
             st.error(message)
             return
+        xray_ok, xray_message = validate_chest_xray(uploaded)
+        if not xray_ok:
+            st.error(xray_message)
+            return
         with st.spinner("Running FedDG-PneuNet inference, graph generation, Grad-CAM, and report creation..."):
             uploaded.seek(0)
             st.session_state.result = run_prediction(uploaded, get_artifacts())
+            st.session_state.patient_name = patient_name_value
             st.session_state.page = "Result"
         st.rerun()
 
@@ -492,17 +621,21 @@ def page_result() -> None:
 
     result_class = "risk" if result["prediction"].lower() == "pneumonia" else "clear"
     confidence = min(max(float(result["confidence"]), 0.0), 100.0)
+    patient_name = escape(str(st.session_state.get("patient_name", "—")))
     st.markdown(
         f"""
         <section class="result-grid">
             <article class="result-summary {result_class}">
-                <p class="eyebrow">Classification</p>
-                <h2 class="result-title {result_class}">{escape(result['prediction'])}</h2>
+                <p class="eyebrow">Patient · {patient_name}</p>
+                <h2 class="result-title {result_class}">{patient_name}: {escape(result['prediction'])}</h2>
                 <div class="confidence-meter">
                     <div class="meter-header"><span>Confidence</span><strong>{confidence:.2f}%</strong></div>
                     <div class="meter-track"><span class="meter-fill" style="width:{confidence:.2f}%"></span></div>
                 </div>
                 <dl class="result-metrics">
+                    <div><dt>Patient name</dt><dd>{patient_name}</dd></div>
+                    <div><dt>Prediction result</dt><dd>{escape(result['prediction'])}</dd></div>
+                    <div><dt>Confidence score</dt><dd>{confidence:.2f}%</dd></div>
                     <div><dt>Pneumonia probability</dt><dd>{result['probability'] * 100:.2f}%</dd></div>
                     <div><dt>Decision threshold</dt><dd>{result['threshold']:.2f}</dd></div>
                     <div><dt>Graph nodes</dt><dd>{result['graph_nodes']}</dd></div>
