@@ -44,6 +44,7 @@ def _ensure_inference_imported() -> None:
 
 APP_NAME = "FedDG-PneuNet"
 APP_ROOT = Path(__file__).resolve().parent
+NAV_PAGES = ("Home", "Result", "Research", "Awareness")
 MODEL_DIR = APP_ROOT / "model"
 REQUIRED_MODEL_FILES = (
     "feature_extractor.h5",
@@ -794,7 +795,7 @@ def page_home() -> None:
                     reports_dir=APP_ROOT / "reports",
                 )
                 st.session_state.patient_name = patient_name_value
-                st.session_state["page"] = "Result"
+                st.session_state.navigate_to = "Result"
         except Exception as exc:
             st.error(f"Prediction failed: {exc}")
             return
@@ -819,7 +820,7 @@ def page_result() -> None:
     if not result:
         st.info("No result yet. Upload a chest X-ray from Home to run a FedDG-PneuNet prediction.")
         if st.button("Start analysis", type="primary"):
-            st.session_state["page"] = "Home"
+            st.session_state.navigate_to = "Home"
             st.rerun()
         return
 
@@ -1029,20 +1030,27 @@ def render_model_status() -> None:
     )
 
 
+def _apply_pending_navigation() -> None:
+    """Set nav page before the radio widget renders (Streamlit session-state rule)."""
+    pending = st.session_state.pop("navigate_to", None)
+    if pending in NAV_PAGES:
+        st.session_state.page = pending
+    elif "page" not in st.session_state or st.session_state.page not in NAV_PAGES:
+        st.session_state.page = "Home"
+
+
 def _run_app() -> None:
     css()
+    _apply_pending_navigation()
     render_model_status()
     brand_col, nav_col = st.columns([1.35, 1], gap="large")
     with brand_col:
         html_brand()
     with nav_col:
         st.markdown('<div class="nav-shell">', unsafe_allow_html=True)
-        pages = ["Home", "Result", "Research", "Awareness"]
-        if "page" not in st.session_state or st.session_state.page not in pages:
-            st.session_state.page = "Home"
         page = st.radio(
             "Navigation",
-            pages,
+            list(NAV_PAGES),
             horizontal=True,
             label_visibility="collapsed",
             key="page",
