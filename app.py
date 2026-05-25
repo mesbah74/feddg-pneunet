@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Iterable
 from html import escape
@@ -9,10 +10,24 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-from model.inference import load_artifacts, run_prediction
+try:
+    from model.inference import load_artifacts, run_prediction
+except Exception as _inference_import_error:  # pragma: no cover - surfaces in UI
+    load_artifacts = None  # type: ignore[assignment]
+    run_prediction = None  # type: ignore[assignment]
+    INFERENCE_IMPORT_ERROR = str(_inference_import_error)
+else:
+    INFERENCE_IMPORT_ERROR = ""
 
 APP_NAME = "FedDG-PneuNet"
-MODEL_DIR = Path("model")
+APP_ROOT = Path(__file__).resolve().parent
+MODEL_DIR = APP_ROOT / "model"
+REQUIRED_MODEL_FILES = (
+    "feature_extractor.h5",
+    "feddg_gatnet_model.h5",
+    "reference_features.npy",
+    "reference_labels.npy",
+)
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 INVALID_XRAY_MESSAGE = "Please upload a valid Chest X-ray image."
@@ -229,8 +244,8 @@ def css() -> None:
             border: 1px solid var(--line) !important; border-radius: 6px !important; font-weight: 700;
         }
         [data-testid="stFileUploader"] [data-testid="stFileUploaderBackdrop"] { display: none !important; }
-        [data-testid="stFileUploader"] [data-testid="stFileUploadDropzone"] [style*="background-color: rgb(0"] {
-            background: linear-gradient(180deg, rgba(239,248,255,.9), rgba(255,255,255,.98)) !important;
+        [data-testid="stFileUploader"] [data-testid="stFileUploadDropzone"] {
+            color: var(--text);
         }
         [data-testid="stAlert"] {
             border-radius: var(--radius); color: var(--text) !important;
@@ -397,9 +412,54 @@ def css() -> None:
     )
 
 
+def check_model_files() -> tuple[bool, str]:
+    """Verify required artifacts exist before TensorFlow load."""
+    if load_artifacts is None:
+        return False, f"Inference module unavailable: {INFERENCE_IMPORT_ERROR}"
+    missing = [name for name in REQUIRED_MODEL_FILES if not (MODEL_DIR / name).is_file()]
+    if missing:
+        return (
+            False,
+            "Missing model files in `model/`: " + ", ".join(missing),
+        )
+    return True, ""
+
+
 @st.cache_resource(show_spinner="Loading FedDG-PneuNet model artifacts...")
 def get_artifacts():
+    ready, message = check_model_files()
+    if not ready:
+        raise RuntimeError(message)
     return load_artifacts(MODEL_DIR)
+
+
+def safe_page_index(pages: list[str], current: str) -> int:
+    try:
+        return pages.index(current)
+    except ValueError:
+        return 0
+
+
+def uploaded_file_size(uploaded_file) -> int:
+    """Streamlit uploads may not populate `.size`; fall back to byte length."""
+    size = getattr(uploaded_file, "size", None)
+    if isinstance(size, int) and size >= 0:
+        return size
+    uploaded_file.seek(0)
+    data = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
+    uploaded_file.seek(0)
+    return len(data)
+
+
+def show_upload_preview(uploaded_file) -> None:
+    """Render preview from PIL to avoid NoneType errors with raw upload handles."""
+    try:
+        uploaded_file.seek(0)
+        preview = Image.open(uploaded_file).convert("RGB")
+        uploaded_file.seek(0)
+        st.image(preview, caption="Selected chest X-ray preview", use_container_width=True)
+    except Exception:
+        st.error("The uploaded image could not be previewed.")
 
 
 def html_brand() -> None:
@@ -468,16 +528,27 @@ def footer() -> None:
 def validate_upload(uploaded_file) -> tuple[bool, str]:
     if uploaded_file is None:
         return False, "Please choose a chest X-ray image."
-    suffix = Path(uploaded_file.name).suffix.lower()
+    name = getattr(uploaded_file, "name", None) or "upload"
+    suffix = Path(name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         return False, "Only JPG, JPEG, and PNG images are allowed."
-    if uploaded_file.size <= 0 or uploaded_file.size > MAX_UPLOAD_BYTES:
+    size = uploaded_file_size(uploaded_file)
+    if size <= 0 or size > MAX_UPLOAD_BYTES:
         return False, "Image size must be greater than 0 and no larger than 8 MB."
     try:
         uploaded_file.seek(0)
-        image = Image.open(uploaded_file)
-        image.verify()
+        raw = uploaded_file.read()
         uploaded_file.seek(0)
+        if not raw:
+            return False, "The uploaded image could not be read."
+        buffer = io.BytesIO(raw)
+        with Image.open(buffer) as image:
+            image.verify()
+        buffer.seek(0)
+        with Image.open(buffer) as image:
+            width, height = image.size
+        if width < 32 or height < 32:
+            return False, "The uploaded image is too small to analyze."
     except Exception:
         return False, "The uploaded image could not be read."
     return True, ""
@@ -512,10 +583,12 @@ def validate_chest_xray(uploaded_file) -> tuple[bool, str]:
     Natural photos, cartoons, and colorful scenes fail before model inference runs.
     """
     rgb = _load_rgb_array(uploaded_file)
-    if rgb is None:
+    if rgb is None or rgb.size == 0:
         return False, INVALID_XRAY_MESSAGE
 
     rgb = _resize_for_validation(rgb)
+    if rgb.shape[0] < 8 or rgb.shape[1] < 8:
+        return False, INVALID_XRAY_MESSAGE
     red = rgb[:, :, 0].astype(np.float32)
     green = rgb[:, :, 1].astype(np.float32)
     blue = rgb[:, :, 2].astype(np.float32)
@@ -556,7 +629,10 @@ def validate_chest_xray(uploaded_file) -> tuple[bool, str]:
         return False, INVALID_XRAY_MESSAGE
 
     edges = cv2.Canny(gray, 50, 150)
-    edge_density = float(np.count_nonzero(edges) / edges.size)
+    edge_pixels = int(edges.size)
+    if edge_pixels == 0:
+        return False, INVALID_XRAY_MESSAGE
+    edge_density = float(np.count_nonzero(edges) / edge_pixels)
     if edge_density < 0.008 or edge_density > 0.35:
         return False, INVALID_XRAY_MESSAGE
 
@@ -581,7 +657,10 @@ def validate_chest_xray(uploaded_file) -> tuple[bool, str]:
 
 
 def read_bytes(path: str | Path) -> bytes:
-    return Path(path).read_bytes()
+    file_path = Path(path)
+    if not file_path.is_file():
+        return b""
+    return file_path.read_bytes()
 
 
 def svg_icon(name: str) -> str:
@@ -651,12 +730,18 @@ def page_home() -> None:
             if ok:
                 xray_ok, xray_message = validate_chest_xray(uploaded)
                 if xray_ok:
-                    st.image(uploaded, caption="Selected chest X-ray preview", use_container_width=True)
+                    show_upload_preview(uploaded)
                 else:
                     st.error(xray_message)
             else:
                 st.error(message)
-        run = st.button("Run prediction", type="primary", use_container_width=True)
+        models_ready, _ = check_model_files()
+        run = st.button(
+            "Run prediction",
+            type="primary",
+            use_container_width=True,
+            disabled=not models_ready,
+        )
 
     if run:
         patient_name_value = (patient_name or "").strip()
@@ -671,11 +756,24 @@ def page_home() -> None:
         if not xray_ok:
             st.error(xray_message)
             return
-        with st.spinner("Running FedDG-PneuNet inference, graph generation, Grad-CAM, and report creation..."):
-            uploaded.seek(0)
-            st.session_state.result = run_prediction(uploaded, get_artifacts())
-            st.session_state.patient_name = patient_name_value
-            st.session_state.page = "Result"
+        models_ok, models_message = check_model_files()
+        if not models_ok:
+            st.error(models_message)
+            return
+        try:
+            with st.spinner("Running FedDG-PneuNet inference, graph generation, Grad-CAM, and report creation..."):
+                uploaded.seek(0)
+                st.session_state.result = run_prediction(
+                    uploaded,
+                    get_artifacts(),
+                    uploads_dir=APP_ROOT / "uploads",
+                    reports_dir=APP_ROOT / "reports",
+                )
+                st.session_state.patient_name = patient_name_value
+                st.session_state.page = "Result"
+        except Exception as exc:
+            st.error(f"Prediction failed: {exc}")
+            return
         st.rerun()
 
     st.markdown(
@@ -701,27 +799,28 @@ def page_result() -> None:
             st.rerun()
         return
 
-    result_class = "risk" if result["prediction"].lower() == "pneumonia" else "clear"
-    confidence = min(max(float(result["confidence"]), 0.0), 100.0)
+    prediction_label = str(result.get("prediction", "Unknown"))
+    result_class = "risk" if prediction_label.lower() == "pneumonia" else "clear"
+    confidence = min(max(float(result.get("confidence", 0.0)), 0.0), 100.0)
     patient_name = escape(str(st.session_state.get("patient_name", "—")))
     st.markdown(
         f"""
         <section class="result-grid">
             <article class="result-summary {result_class}">
                 <p class="eyebrow">Patient · {patient_name}</p>
-                <h2 class="result-title {result_class}">{patient_name}: {escape(result['prediction'])}</h2>
+                <h2 class="result-title {result_class}">{patient_name}: {escape(prediction_label)}</h2>
                 <div class="confidence-meter">
                     <div class="meter-header"><span>Confidence</span><strong>{confidence:.2f}%</strong></div>
                     <div class="meter-track"><span class="meter-fill" style="width:{confidence:.2f}%"></span></div>
                 </div>
                 <dl class="result-metrics">
                     <div><dt>Patient name</dt><dd>{patient_name}</dd></div>
-                    <div><dt>Prediction result</dt><dd>{escape(result['prediction'])}</dd></div>
+                    <div><dt>Prediction result</dt><dd>{escape(prediction_label)}</dd></div>
                     <div><dt>Confidence score</dt><dd>{confidence:.2f}%</dd></div>
-                    <div><dt>Pneumonia probability</dt><dd>{result['probability'] * 100:.2f}%</dd></div>
-                    <div><dt>Decision threshold</dt><dd>{result['threshold']:.2f}</dd></div>
-                    <div><dt>Graph nodes</dt><dd>{result['graph_nodes']}</dd></div>
-                    <div><dt>Prediction timestamp</dt><dd>{escape(str(result['timestamp']))}</dd></div>
+                    <div><dt>Pneumonia probability</dt><dd>{float(result.get('probability', 0.0)) * 100:.2f}%</dd></div>
+                    <div><dt>Decision threshold</dt><dd>{float(result.get('threshold', 0.0)):.2f}</dd></div>
+                    <div><dt>Graph nodes</dt><dd>{result.get('graph_nodes', '—')}</dd></div>
+                    <div><dt>Prediction timestamp</dt><dd>{escape(str(result.get('timestamp', '—')))}</dd></div>
                 </dl>
             </article>
             <article class="glass-card" style="padding:24px;">
@@ -732,10 +831,10 @@ def page_result() -> None:
                     and classified the uploaded image through EdgeAwareGATv2 inference.
                 </p>
                 <div class="metric-grid">
-                    <div class="metric-card"><span>Normal neighbors</span><strong>{result['normal_neighbors']}</strong></div>
-                    <div class="metric-card"><span>Pneumonia neighbors</span><strong>{result['pneumonia_neighbors']}</strong></div>
-                    <div class="metric-card"><span>References used</span><strong>{result['neighbors']}</strong></div>
-                    <div class="metric-card"><span>Preprocessing</span><strong>{escape(str(result['normalization']))}</strong></div>
+                    <div class="metric-card"><span>Normal neighbors</span><strong>{result.get('normal_neighbors', '—')}</strong></div>
+                    <div class="metric-card"><span>Pneumonia neighbors</span><strong>{result.get('pneumonia_neighbors', '—')}</strong></div>
+                    <div class="metric-card"><span>References used</span><strong>{result.get('neighbors', '—')}</strong></div>
+                    <div class="metric-card"><span>Preprocessing</span><strong>{escape(str(result.get('normalization', '—')))}</strong></div>
                 </div>
             </article>
         </section>
@@ -743,15 +842,23 @@ def page_result() -> None:
         unsafe_allow_html=True,
     )
 
+    image_path = Path(str(result.get("image_path", "")))
+    heatmap_path = Path(str(result["heatmap_path"])) if result.get("heatmap_path") else None
+    report_path = Path(str(result.get("report_path", "")))
+    saved_prediction_path = Path(str(result.get("saved_prediction_path", "")))
+
     col1, col2 = st.columns(2)
     with col1:
         st.markdown('<div class="image-panel"><h3>Uploaded X-ray</h3>', unsafe_allow_html=True)
-        st.image(result["image_path"], use_container_width=True)
+        if image_path.is_file():
+            st.image(str(image_path), use_container_width=True)
+        else:
+            st.warning("Uploaded X-ray image is not available.")
         st.markdown("</div>", unsafe_allow_html=True)
     with col2:
         st.markdown('<div class="image-panel"><h3>Grad-CAM</h3>', unsafe_allow_html=True)
-        if result.get("heatmap_path"):
-            st.image(result["heatmap_path"], use_container_width=True)
+        if heatmap_path and heatmap_path.is_file():
+            st.image(str(heatmap_path), use_container_width=True)
         else:
             st.warning("Grad-CAM was unavailable for this run.")
         st.markdown("</div>", unsafe_allow_html=True)
@@ -759,9 +866,23 @@ def page_result() -> None:
     st.write("")
     b1, b2, b3 = st.columns(3)
     with b1:
-        st.download_button("Download PDF Report", read_bytes(result["report_path"]), file_name=Path(result["report_path"]).name, mime="application/pdf", use_container_width=True)
+        st.download_button(
+            "Download PDF Report",
+            read_bytes(report_path),
+            file_name=report_path.name or "report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            disabled=not report_path.is_file(),
+        )
     with b2:
-        st.download_button("Save Prediction", read_bytes(result["saved_prediction_path"]), file_name=Path(result["saved_prediction_path"]).name, mime="application/json", use_container_width=True)
+        st.download_button(
+            "Save Prediction",
+            read_bytes(saved_prediction_path),
+            file_name=saved_prediction_path.name or "prediction.json",
+            mime="application/json",
+            use_container_width=True,
+            disabled=not saved_prediction_path.is_file(),
+        )
     with b3:
         st.markdown('<button onclick="window.print()" style="width:100%;min-height:46px;border:0;border-radius:6px;background:#ecf6ff;color:#0b3f93;font-weight:850;cursor:pointer;">Print Report</button>', unsafe_allow_html=True)
 
@@ -873,19 +994,31 @@ def page_research() -> None:
     )
 
 
+def render_model_status() -> None:
+    ready, message = check_model_files()
+    if ready:
+        return
+    st.error(message)
+    st.info(
+        "Place `feature_extractor.h5`, `feddg_gatnet_model.h5`, "
+        "`reference_features.npy`, and `reference_labels.npy` inside the `model/` folder."
+    )
+
+
 def main() -> None:
     css()
-    brand_col, nav_col = st.columns([1.35, 1], gap="large", vertical_alignment="center")
+    render_model_status()
+    brand_col, nav_col = st.columns([1.35, 1], gap="large")
     with brand_col:
         html_brand()
     with nav_col:
         st.markdown('<div class="nav-shell">', unsafe_allow_html=True)
         pages = ["Home", "Result", "Research", "Awareness"]
-        current = st.session_state.get("page", "Home")
+        current = str(st.session_state.get("page", "Home"))
         page = st.radio(
             "Navigation",
             pages,
-            index=pages.index(current),
+            index=safe_page_index(pages, current),
             horizontal=True,
             label_visibility="collapsed",
             key="main_navigation",

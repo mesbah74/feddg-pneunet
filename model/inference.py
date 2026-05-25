@@ -432,13 +432,18 @@ def create_prediction_report(image_path: Path, heatmap_path: Optional[Path], out
 
 
 def run_prediction(uploaded_file: Any, artifacts: ModelArtifacts, uploads_dir: str | Path = "uploads", reports_dir: str | Path = "reports") -> dict[str, Any]:
+    if uploaded_file is None:
+        raise ValueError("No chest X-ray file was provided.")
+
     uploads_dir = Path(uploads_dir)
     reports_dir = Path(reports_dir)
     uploads_dir.mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
 
+    uploaded_file.seek(0)
     run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:10]}"
-    suffix = Path(uploaded_file.name).suffix.lower() or ".png"
+    upload_name = getattr(uploaded_file, "name", None) or "upload.png"
+    suffix = Path(upload_name).suffix.lower() or ".png"
     image_path = uploads_dir / f"xray_{run_id}{suffix}"
 
     image = Image.open(uploaded_file)
